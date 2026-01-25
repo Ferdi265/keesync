@@ -1,0 +1,513 @@
+#!/bin/bash
+
+KEESYNC_CONFIGPATH=${KEESYNC_CONFIGPATH:-~/.config/keesync/config.sh}
+KEESYNC_HOSTNAME=${KEESYNC_HOSTNAME:-${HOSTNAME:-unknown}}
+KEESYNC_HPATH=${KEESYNC_HPATH:-.keepassx}
+KEESYNC_LHPATH=${KEESYNC_LHPATH:-${KEESYNC_HPATH}}
+KEESYNC_DBNAME=${KEESYNC_DBNAME:-passwords}
+KEESYNC_RSUFFIX=${KEESYNC_RSUFFIX:-remote}
+KEESYNC_XSUFFIX=${KEESYNC_XSUFFIX:-last}
+KEESYNC_DBSUFFIX=${KEESYNC_DBSUFFIX:-kdbx}
+KEESYNC_MTSUFFIX=${KEESYNC_MTSUFFIX:-mtime}
+KEESYNC_ITSUFFIX=${KEESYNC_ITSUFFIX:-itime}
+KEESYNC_SSH=${KEESYNC_SSH:-ssh}
+KEESYNC_SCP=${KEESYNC_SCP:-rsync -e ssh --info=NAME}
+
+term_color() {
+    echo -n $'\x1b['"$1"';'"$2"'m'
+}
+
+RH="$(term_color 1 31)"
+GH="$(term_color 1 32)"
+YH="$(term_color 1 33)"
+BH="$(term_color 1 34)"
+WH="$(term_color 1 37)"
+X="$(term_color 0 0)"
+
+msg_header() {
+    [[ $# -ne 1 ]] && exit 2
+    local color="$1"
+
+    echo -n "${WH}[${color}KeeSync${WH}]${X} "
+}
+
+msg() {
+    [[ $# -ne 2 ]] && exit 2
+    local color="$1"
+    local msg="$2"
+
+    msg_header "$color"
+    echo "$msg"
+}
+
+check_dep() {
+    [[ $# -ne 1 ]] && exit 2
+    local prog="$1"
+
+    type -p "$prog" >/dev/null 2>/dev/null
+}
+
+KEESYNC_DID_UPDATE=0
+install_dep() {
+    [[ $# -ne 1 ]] && exit 2
+    local pkg="$1"
+
+    local SUDO=()
+    if check_dep "sudo"; then
+        SUDO=( "sudo" )
+    fi
+
+    local UPDATE_CMD=()
+    local INSTALL_CMD=()
+    if check_dep "pkg"; then
+        UPDATE_CMD=(pkg update)
+        INSTALL_CMD=(pkg install)
+    elif check_dep "apt"; then
+        UPDATE_CMD=(apt update)
+        INSTALL_CMD=(apt install)
+    elif check_dep "pacman"; then
+        UPDATE_CMD=(pacman -Sy)
+        INSTALL_CMD=(pacman -S)
+    else
+        msg "$RH" "don't know how to install packages on this system"
+        exit 2
+    fi
+
+    if [[ "$KEESYNC_DID_UPDATE" -eq 0 ]]; then
+        if ! "${SUDO[@]}" "${UPDATE_CMD[@]}"; then
+            msg "$RH" "failed to update package lists"
+            exit 2
+        fi
+
+        KEESYNC_DID_UPDATE=1
+    fi
+
+    if ! "${SUDO[@]}" "${INSTALL_CMD[@]}" "$pkg"; then
+        msg "$RH" "failed to install ${WH}'$pkg'${X}"
+        exit 2
+    fi
+}
+
+check_and_install_dep() {
+    [[ $# -ne 2 ]] && exit 2
+    local prog="$1"
+    local pkg="$2"
+
+    check_dep "$prog" && return 0
+
+    msg "$YH" "missing program: ${WH}'$prog'${X}, installing package ${WH}'$pkg'${X}"
+    install_dep "$pkg"
+}
+
+check_and_install_deps() {
+    check_and_install_dep "ssh" "openssh"
+    check_and_install_dep "rsync" "rsync"
+}
+
+fmt_epoch_fs() {
+    [[ $# -ne 1 ]] && exit 2
+    local t="$1"
+
+    date -d "@$t" "+%Y%m%d-%H%M%S"
+}
+
+fmt_epoch_human() {
+    [[ $# -ne 1 ]] && exit 2
+    local t="$1"
+
+    date -d "@$t" "+%Y-%m-%d %H:%M:%S"
+}
+
+get_local_filename() {
+    [[ $# -ne 2 ]] && exit 2
+    local name="$1"
+    local suffix="$2"
+
+    echo ~/"${KEESYNC_LHPATH}/${name}.${suffix}"
+}
+
+get_remote_filename() {
+    [[ $# -ne 2 ]] && exit 2
+    local name="$1"
+    local suffix="$2"
+
+    echo "${KEESYNC_SERVER}:${KEESYNC_HPATH}/${name}.${suffix}"
+}
+
+# shellcheck disable=SC2120
+get_cur_time() {
+    [[ $# -ne 0 ]] && exit 2
+    date "+%s"
+}
+
+get_saved_mtime() {
+    [[ $# -ne 1 ]] && exit 2
+    local name="$1"
+
+    cat "$(get_local_filename "$name" "${KEESYNC_MTSUFFIX}")" 2>/dev/null || echo 0
+}
+
+get_saved_itime() {
+    [[ $# -ne 1 ]] && exit 2
+    local name="$1"
+
+    cat "$(get_local_filename "$name" "${KEESYNC_ITSUFFIX}")" 2>/dev/null || echo 0
+}
+
+has() {
+    [[ $# -ne 1 ]] && exit 2
+    local srcname="$1"
+    local dbfile="$(get_local_filename "${srcname}" "${KEESYNC_DBSUFFIX}")"
+    local mtfile="$(get_local_filename "${srcname}" "${KEESYNC_MTSUFFIX}")"
+
+    [[ -f "$dbfile" && -f "$mtfile" ]] && echo 1 || echo 0
+}
+
+# shellcheck disable=SC2120
+is_local_changed() {
+    [[ $# -ne 0 ]] && exit 2
+    local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
+    local xdbfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_XSUFFIX}" "${KEESYNC_DBSUFFIX}")"
+
+    if [[ ! -f "$dbfile" ]]; then
+        msg "$YH" "local database missing, assuming unmodified" >/dev/tty
+        echo 0
+    elif [[ -f "$xdbfile" ]]; then
+        diff -q "$dbfile" "$xdbfile" >/dev/null && echo 0 || echo 1
+    else
+        local real_itime=$(get_cur_time)
+        local itime=$(get_saved_itime "${KEESYNC_DBNAME}")
+
+        msg "$YH" "can't directly compare databases, comparison file missing" >/dev/tty
+        msg "$YH" "checking whether DB is modified by comparing file timestampts" >/dev/tty
+        [[ $real_itime -gt $itime ]] && echo 1 || echo 0
+    fi
+}
+
+# shellcheck disable=SC2120
+is_remote_updated() {
+    [[ $# -ne 0 ]] && exit 2
+    local local_saved_mtime=$(get_saved_mtime "${KEESYNC_DBNAME}")
+    local remote_saved_mtime=$(get_saved_mtime "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}")
+
+    [[ $remote_saved_mtime -gt $local_saved_mtime ]] && echo 1 || echo 0
+}
+
+# --- commands ---
+
+# shellcheck disable=SC2120
+pull_remote() {
+    [[ $# -ne 0 ]] && exit 2
+
+    msg "$WH" "pulling latest remote database"
+
+    local prev_mtime=$(get_saved_mtime "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}")
+    local success=1
+    $KEESYNC_SCP "$(get_remote_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")" "$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}" "${KEESYNC_DBSUFFIX}")" || success=0
+    $KEESYNC_SCP "$(get_remote_filename "${KEESYNC_DBNAME}" "${KEESYNC_MTSUFFIX}")" "$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}" "${KEESYNC_MTSUFFIX}")" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$GH" "pull succeeded"
+
+        local new_mtime=$(get_saved_mtime "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}")
+
+        if [[ $new_mtime -ne $prev_mtime ]]; then
+            msg "$GH" "remote database updated on ${WH}$(fmt_epoch_human $new_mtime)${X}"
+        else
+            msg "$GH" "remote database up to date"
+        fi
+    else
+        msg "$RH" "pull failed"
+        exit 1
+    fi
+}
+
+# shellcheck disable=SC2120
+pull_backups() {
+    [[ $# -ne 0 ]] && exit 2
+
+    msg "$WH" "pulling all remote backups"
+
+    local success=1
+    $KEESYNC_SCP "$(get_remote_filename "backup-*" "*")" ~/"${KEESYNC_LHPATH}/" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$GH" "pull succeeded"
+    else
+        msg "$RH" "pull failed"
+        exit 1
+    fi
+}
+
+# shellcheck disable=SC2120
+pull_script() {
+    [[ $# -ne 0 ]] && exit 2
+
+    msg "$WH" "pulling remote keesync script"
+
+    local success=1
+    $KEESYNC_SCP "$(get_remote_filename "keesync" "sh")" "$(get_local_filename "keesync" "sh")" || success=0
+    cp "$(get_local_filename "keesync" "sh")" "${BASH_SOURCE[0]}" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$GH" "pull succeeded"
+        exit 0
+    else
+        msg "$RH" "pull failed"
+        exit 1
+    fi
+}
+
+push_backup() {
+    [[ $# -ne 1 ]] && exit 2
+    local backupname="$1"
+
+    msg "$WH" "pushing $backupname"
+
+    local success=1
+    $KEESYNC_SCP "$(get_local_filename "${backupname}" "${KEESYNC_DBSUFFIX}")" "$(get_remote_filename "${backupname}" "${KEESYNC_DBSUFFIX}")" || success=0
+    $KEESYNC_SCP "$(get_local_filename "${backupname}" "${KEESYNC_MTSUFFIX}")" "$(get_remote_filename "${backupname}" "${KEESYNC_MTSUFFIX}")" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$GH" "push succeeded"
+    else
+        msg "$RH" "push failed"
+        exit 1
+    fi
+}
+
+# shellcheck disable=SC2120
+backup_changed() {
+    [[ $# -ne 0 ]] && exit 2
+
+    local local_changed=$(is_local_changed)
+    if [[ $local_changed -eq 1 ]]; then
+        msg "$WH" "local database changed"
+        backup_latest
+    fi
+}
+
+KEESYNC_DB_OVERWRITE_UNLOCKED=0
+# shellcheck disable=SC2120
+unlock_db_overwrite() {
+    [[ $# -ne 0 ]] && exit 2
+
+    if [[ "$KEESYNC_DB_OVERWRITE_UNLOCKED" -eq 0 ]]; then
+        backup_changed
+        KEESYNC_DB_OVERWRITE_UNLOCKED=1
+    fi
+
+    # return status code
+    [[ "$KEESYNC_DB_OVERWRITE_UNLOCKED" -eq 1 ]]
+}
+
+# shellcheck disable=SC2120
+push_latest() {
+    [[ $# -ne 0 ]] && exit 2
+    unlock_db_overwrite || exit 2
+
+    msg "$WH" "pushing latest local database"
+
+    local success=1
+    $KEESYNC_SCP "$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")" "$(get_remote_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")" || success=0
+    $KEESYNC_SCP "$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_ITSUFFIX}")" "$(get_remote_filename "${KEESYNC_DBNAME}" "${KEESYNC_MTSUFFIX}")" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$GH" "push succeeded"
+        local rdbfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}" "${KEESYNC_DBSUFFIX}")"
+        local rmtfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}" "${KEESYNC_MTSUFFIX}")"
+        local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
+        local xdbfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_XSUFFIX}" "${KEESYNC_DBSUFFIX}")"
+        local mtfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_MTSUFFIX}")"
+        local itfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_ITSUFFIX}")"
+
+        cp "$dbfile" "$rdbfile"
+        cp "$dbfile" "$xdbfile"
+        cp "$itfile" "$rmtfile"
+        cp "$itfile" "$mtfile"
+    else
+        msg "$RH" "push failed"
+        exit 1
+    fi
+}
+
+# shellcheck disable=SC2120
+push_script() {
+    [[ $# -ne 0 ]] && exit 2
+
+    msg "$WH" "pushing local keesync script"
+
+    local success=1
+    cp "${BASH_SOURCE[0]}" "$(get_local_filename "keesync" "sh")" || success=0
+    $KEESYNC_SCP "$(get_local_filename "keesync" "sh")" "$(get_remote_filename "keesync" "sh")" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        cp "$(get_local_filename "keesync" "sh")" "${BASH_SOURCE[0]}"
+        msg "$GH" "push succeeded"
+    else
+        msg "$RH" "push failed"
+        exit 1
+    fi
+}
+
+# shellcheck disable=SC2120
+backup_latest() {
+    [[ $# -ne 0 ]] && exit 2
+
+    msg "$WH" "backing up database"
+
+    local real_itime=$(get_cur_time)
+    local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
+    local itfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_ITSUFFIX}")"
+
+    local backupname="backup-$(fmt_epoch_fs "$real_itime")-${KEESYNC_HOSTNAME}"
+    local backupdbfile="$(get_local_filename "$backupname" "${KEESYNC_DBSUFFIX}")"
+    local backupmtfile="$(get_local_filename "$backupname" "${KEESYNC_MTSUFFIX}")"
+
+    cp "$dbfile" "$backupdbfile"
+    echo "$real_itime" > "$itfile"
+    echo "$real_itime" > "$backupmtfile"
+
+    push_backup "$backupname"
+}
+
+selectdb() {
+    [[ $# -ne 1 ]] && exit 2
+    unlock_db_overwrite || exit 2
+    local srcname="$1"
+
+    local rdbfile="$(get_local_filename "${srcname}" "${KEESYNC_DBSUFFIX}")"
+    local rmtfile="$(get_local_filename "${srcname}" "${KEESYNC_MTSUFFIX}")"
+    local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
+    local xdbfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_XSUFFIX}" "${KEESYNC_DBSUFFIX}")"
+    local mtfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_MTSUFFIX}")"
+    local itfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_ITSUFFIX}")"
+
+    cp "$rdbfile" "$dbfile"
+    cp "$rdbfile" "$xdbfile"
+    cp "$rmtfile" "$mtfile"
+    local real_itime=$(get_cur_time)
+    echo "$real_itime" > "$itfile"
+}
+
+normal_sync() {
+    pull_remote
+
+    local local_changed=$(is_local_changed)
+    local remote_updated=$(is_remote_updated)
+    unlock_db_overwrite || exit 2
+
+    if [[ $local_changed -eq 1 && $remote_updated -eq 0 ]]; then
+        push_latest
+    elif [[ $local_changed -eq 0 && $remote_updated -eq 1 ]]; then
+        selectdb "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}"
+        msg "$GH" "updated to latest remote database"
+    elif [[ $local_changed -eq 1 && $remote_updated -eq 1 ]]; then
+        local rdbfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}" "${KEESYNC_DBSUFFIX}")"
+        msg "$YH" "both local and remote have changed"
+        msg "$YH" "please merge from this DB: ${WH}$(basename "$rdbfile")${X}"
+        msg "$YH" "and then run ${WH}keesync force_push${X}"
+    elif [[ $local_changed -eq 0 && $remote_updated -eq 0 ]]; then
+        msg "$WH" "no changes, nothing to do"
+    else
+        exit 2
+    fi
+}
+
+user_selectdb() {
+    [[ $# -ne 1 ]] && exit 2
+    local name="$1"
+
+    local exists=$(has "$name")
+    if [[ $exists -eq 1 ]]; then
+        selectdb "$name"
+        msg "$GH" "successfully selected $name"
+    else
+        msg "$WH" "no such database"
+    fi
+}
+
+user_listdb() {
+    shopt -s nullglob
+    pushd ~/"${KEESYNC_LHPATH}" >/dev/null || exit 2
+    local DBLIST=( "backup-"*".${KEESYNC_MTSUFFIX}" )
+    popd >/dev/null || exit 2
+    shopt -u nullglob
+
+    msg "$WH" "available databases:"
+    local name="${KEESYNC_DBNAME}"
+    local mtime=$(get_saved_mtime "$name")
+    echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
+
+    local name="${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}"
+    local mtime=$(get_saved_mtime "$name")
+    echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
+
+    for f in "${DBLIST[@]}"; do
+        local name="${f%."${KEESYNC_MTSUFFIX}"}"
+        local mtime=$(get_saved_mtime "$name")
+        echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
+    done
+}
+
+if [[ -f "$KEESYNC_CONFIGPATH" ]]; then
+    source "$KEESYNC_CONFIGPATH"
+fi
+
+if [[ -z "$KEESYNC_SERVER" ]]; then
+    msg "$RH" "environment variable KEESYNC_SERVER is not set"
+    msg "$RH" "please set KEESYNC_SERVER so that 'ssh \$KEESYNC_SERVER' is valid"
+    exit 1
+fi
+
+check_and_install_deps
+
+if [[ $# -eq 0 ]]; then
+    normal_sync
+elif [[ $# -eq 1 ]]; then
+    case "$1" in
+        help)
+            msg "$GH" "usage:"
+            msg "$GH" ""
+            msg "$GH" "keesync ................... normal sync"
+            msg "$GH" "keesync help .............. print this help"
+            msg "$GH" ""
+            msg "$GH" "keesync force_push ........ force push DB"
+            msg "$GH" "keesync force_pull ........ force pull DB"
+            msg "$GH" "keesync force_backup ...... force backup current DB"
+            msg "$GH" ""
+            msg "$GH" "keesync list .............. list all DB backups"
+            msg "$GH" "keesync pull_backups ...... download all DB backups"
+            msg "$GH" "keesync select [version] .. select a DB backup to use"
+            msg "$GH" ""
+            msg "$GH" "keesync push_script ....... force push keesync script"
+            msg "$GH" "keesync pull_script ....... force pull keesync script"
+            ;;
+
+        force_push) push_latest;;
+        force_pull)
+            pull_remote
+            selectdb "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}"
+            msg "$GH" "updated to latest remote database";;
+        force_backup) backup_latest;;
+
+        list) user_listdb;;
+        pull_backups) pull_backups;;
+
+        push_script) push_script;;
+        pull_script) pull_script;;
+
+        *)
+            msg "$RH" "invalid arguments, see ${WH}keesync help${X}"
+            exit 1;;
+    esac
+elif [[ $# -eq 2 ]]; then
+    case "$1" in
+        select) user_selectdb "$2";;
+        *)
+            msg "$RH" "invalid arguments, see ${WH}keesync help${X}"
+            exit 1;;
+    esac
+else
+    msg "$RH" "invalid arguments, see ${WH}keesync help${X}"
+fi

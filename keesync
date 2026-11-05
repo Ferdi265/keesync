@@ -11,6 +11,7 @@ KEESYNC_DBSUFFIX=${KEESYNC_DBSUFFIX:-kdbx}
 KEESYNC_KEYSUFFIX=${KEESYNC_KEYSUFFIX:-kdbx.key}
 KEESYNC_MTSUFFIX=${KEESYNC_MTSUFFIX:-mtime}
 KEESYNC_ITSUFFIX=${KEESYNC_ITSUFFIX:-itime}
+KEESYNC_LBSUFFIX=${KEESYNC_LBSUFFIX:-lastbackup}
 KEESYNC_SSH=${KEESYNC_SSH:-ssh}
 KEESYNC_SCP=${KEESYNC_SCP:-rsync -e ssh --info=NAME}
 
@@ -194,6 +195,26 @@ is_remote_updated() {
     [[ $remote_saved_mtime -gt $local_saved_mtime ]] && echo 1 || echo 0
 }
 
+# shellcheck disable=SC2120
+is_backup_changed() {
+    [[ $# -ne 0 ]] && exit 2
+    local lbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_LBSUFFIX}")"
+
+    if [[ ! -f "$lbfile" ]]; then
+        echo 0
+        return
+    fi
+
+    local backupname="$(cat "$lbfile")"
+    local backupdbfile="$(get_local_filename "$backupname" "${KEESYNC_DBSUFFIX}")"
+    local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
+    if [[ -f "$backupdbfile" ]] && diff -q "$dbfile" "$backupdbfile"; then
+        echo 0
+    else
+        echo 1
+    fi
+}
+
 # --- commands ---
 
 # shellcheck disable=SC2120
@@ -282,9 +303,12 @@ backup_changed() {
     [[ $# -ne 0 ]] && exit 2
 
     local local_changed=$(is_local_changed)
-    if [[ $local_changed -eq 1 ]]; then
+    local backup_changed=$(is_backup_changed)
+    if [[ $local_changed -eq 1 && $is_backup_changed -eq 1 ]]; then
         msg "$WH" "local database changed"
         backup_latest
+    elif [[ $local_changed -eq 1 && $is_backup_changed -eq 0 ]]; then
+        msg "$WH" "local database already backed up"
     fi
 }
 
@@ -360,6 +384,7 @@ backup_latest() {
     local real_itime=$(get_cur_time)
     local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
     local itfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_ITSUFFIX}")"
+    local lbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_LBSUFFIX}")"
 
     local backupname="backup-$(fmt_epoch_fs "$real_itime")-${KEESYNC_HOSTNAME}"
     local backupdbfile="$(get_local_filename "$backupname" "${KEESYNC_DBSUFFIX}")"
@@ -368,6 +393,7 @@ backup_latest() {
     cp "$dbfile" "$backupdbfile"
     echo "$real_itime" > "$itfile"
     echo "$real_itime" > "$backupmtfile"
+    echo "$backupname" > "$lbfile"
 
     push_backup "$backupname"
 }

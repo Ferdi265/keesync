@@ -435,6 +435,12 @@ user_listdb() {
     shopt -u nullglob
 
     msg "$WH" "available databases:"
+    for f in "${DBLIST[@]}"; do
+        local name="${f%."${KEESYNC_MTSUFFIX}"}"
+        local mtime=$(get_saved_mtime "$name")
+        echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
+    done
+
     local name="${KEESYNC_DBNAME}"
     local mtime=$(get_saved_mtime "$name")
     echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
@@ -442,12 +448,6 @@ user_listdb() {
     local name="${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}"
     local mtime=$(get_saved_mtime "$name")
     echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
-
-    for f in "${DBLIST[@]}"; do
-        local name="${f%."${KEESYNC_MTSUFFIX}"}"
-        local mtime=$(get_saved_mtime "$name")
-        echo "  ${WH}$(fmt_epoch_human "$mtime")${X} $name"
-    done
 }
 
 if [[ -f "$KEESYNC_CONFIGPATH" ]]; then

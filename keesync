@@ -8,6 +8,7 @@ KEESYNC_DBNAME=${KEESYNC_DBNAME:-passwords}
 KEESYNC_RSUFFIX=${KEESYNC_RSUFFIX:-remote}
 KEESYNC_XSUFFIX=${KEESYNC_XSUFFIX:-last}
 KEESYNC_DBSUFFIX=${KEESYNC_DBSUFFIX:-kdbx}
+KEESYNC_KEYSUFFIX=${KEESYNC_KEYSUFFIX:-kdbx.key}
 KEESYNC_MTSUFFIX=${KEESYNC_MTSUFFIX:-mtime}
 KEESYNC_ITSUFFIX=${KEESYNC_ITSUFFIX:-itime}
 KEESYNC_SSH=${KEESYNC_SSH:-ssh}
@@ -390,6 +391,29 @@ selectdb() {
     echo "$real_itime" > "$itfile"
 }
 
+mergedb() {
+    [[ $# -ne 1 ]] && exit 2
+    unlock_db_overwrite || exit 2
+    local srcname="$1"
+
+    local rdbfile="$(get_local_filename "${srcname}" "${KEESYNC_DBSUFFIX}")"
+    local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
+    local keyfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_KEYSUFFIX}")"
+    msg "$YH" "merging from ${WH}$(basename "$rdbfile")${X}"
+
+    if [[ "$KEESYNC_MERGE_DRY_RUN" -eq 1 ]]; then
+        local dryrun=--dry-run
+    else
+        local dryrun=
+    fi
+
+    if check_dep keepassxc-cli; then
+        keepassxc-cli merge $dryrun --same-credentials --key-file "$keyfile" "$dbfile" "$rdbfile"
+    else
+        msg "$RH" "please install ${WH}keepassxc-cli${X} to use the merge feature"
+    fi
+}
+
 normal_sync() {
     pull_remote
 
@@ -406,6 +430,7 @@ normal_sync() {
         local rdbfile="$(get_local_filename "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}" "${KEESYNC_DBSUFFIX}")"
         msg "$YH" "both local and remote have changed"
         msg "$YH" "please merge from this DB: ${WH}$(basename "$rdbfile")${X}"
+        msg "$YH" "${WH}hint:${X} you can run ${WH}keesync merge${X} to merge in CLI"
         msg "$YH" "and then run ${WH}keesync force_push${X}"
     elif [[ $local_changed -eq 0 && $remote_updated -eq 0 ]]; then
         msg "$WH" "no changes, nothing to do"
@@ -422,6 +447,34 @@ user_selectdb() {
     if [[ $exists -eq 1 ]]; then
         selectdb "$name"
         msg "$GH" "successfully selected $name"
+    else
+        msg "$WH" "no such database"
+    fi
+}
+
+# shellcheck disable=SC2120
+user_auto_mergedb() {
+    [[ $# -ne 0 ]] && exit 2
+
+    local local_changed=$(is_local_changed)
+    local remote_updated=$(is_remote_updated)
+
+    if [[ $local_changed -eq 1 && $remote_updated -eq 1 ]]; then
+        msg "$YH" "both local and remote have changed"
+        msg "$YH" "automatically merging conflict"
+        mergedb "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}"
+    else
+        msg "$WH" "no conflict, please specify version to merge from"
+    fi
+}
+
+user_mergedb() {
+    [[ $# -ne 1 ]] && exit 2
+    local name="$1"
+
+    local exists=$(has "$name")
+    if [[ $exists -eq 1 ]]; then
+        mergedb "$name"
     else
         msg "$WH" "no such database"
     fi
@@ -479,6 +532,8 @@ elif [[ $# -eq 1 ]]; then
             msg "$GH" "keesync list .............. list all DB backups"
             msg "$GH" "keesync pull-backups ...... download all DB backups"
             msg "$GH" "keesync select [version] .. select a DB backup to use"
+            msg "$GH" "keesync merge [version] ... merge from a DB backup"
+            msg "$GH" "keesync diff [version] .... diff a DB backup (merge dry-run)"
             msg "$GH" ""
             msg "$GH" "keesync push-script ....... force push keesync script"
             msg "$GH" "keesync pull-script ....... force pull keesync script"
@@ -493,6 +548,8 @@ elif [[ $# -eq 1 ]]; then
 
         list) user_listdb;;
         pull-backups|pull_backups) pull_backups;;
+        merge) user_auto_mergedb;;
+        diff) KEESYNC_MERGE_DRY_RUN=1 user_auto_mergedb;;
 
         push-script|push_script) push_script;;
         pull-script|pull_script) pull_script;;
@@ -504,6 +561,8 @@ elif [[ $# -eq 1 ]]; then
 elif [[ $# -eq 2 ]]; then
     case "$1" in
         select) user_selectdb "$2";;
+        merge) user_mergedb "$2";;
+        diff) KEESYNC_MERGE_DRY_RUN=1 user_mergedb "$2";;
         *)
             msg "$RH" "invalid arguments, see ${WH}keesync help${X}"
             exit 1;;

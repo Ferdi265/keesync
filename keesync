@@ -472,30 +472,30 @@ elif [[ $# -eq 1 ]]; then
             msg "$GH" "keesync ................... normal sync"
             msg "$GH" "keesync help .............. print this help"
             msg "$GH" ""
-            msg "$GH" "keesync force_push ........ force push DB"
-            msg "$GH" "keesync force_pull ........ force pull DB"
-            msg "$GH" "keesync force_backup ...... force backup current DB"
+            msg "$GH" "keesync force-push ........ force push DB"
+            msg "$GH" "keesync force-pull ........ force pull DB"
+            msg "$GH" "keesync force-backup ...... force backup current DB"
             msg "$GH" ""
             msg "$GH" "keesync list .............. list all DB backups"
-            msg "$GH" "keesync pull_backups ...... download all DB backups"
+            msg "$GH" "keesync pull-backups ...... download all DB backups"
             msg "$GH" "keesync select [version] .. select a DB backup to use"
             msg "$GH" ""
-            msg "$GH" "keesync push_script ....... force push keesync script"
-            msg "$GH" "keesync pull_script ....... force pull keesync script"
+            msg "$GH" "keesync push-script ....... force push keesync script"
+            msg "$GH" "keesync pull-script ....... force pull keesync script"
             ;;
 
-        force_push) push_latest;;
-        force_pull)
+        force-push|force_push) push_latest;;
+        force-pull|force_pull)
             pull_remote
             selectdb "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}"
             msg "$GH" "updated to latest remote database";;
-        force_backup) backup_latest;;
+        force-backup|force_backup) backup_latest;;
 
         list) user_listdb;;
-        pull_backups) pull_backups;;
+        pull-backups|pull_backups) pull_backups;;
 
-        push_script) push_script;;
-        pull_script) pull_script;;
+        push-script|push_script) push_script;;
+        pull-script|pull_script) pull_script;;
 
         *)
             msg "$RH" "invalid arguments, see ${WH}keesync help${X}"

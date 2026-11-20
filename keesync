@@ -201,7 +201,7 @@ is_backup_changed() {
     local lbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_LBSUFFIX}")"
 
     if [[ ! -f "$lbfile" ]]; then
-        echo 0
+        echo 1
         return
     fi
 

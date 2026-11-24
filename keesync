@@ -298,10 +298,10 @@ backup_changed() {
 
     local local_changed=$(is_local_changed)
     local backup_changed=$(is_backup_changed)
-    if [[ $local_changed -eq 1 && $is_backup_changed -eq 1 ]]; then
+    if [[ $local_changed -eq 1 && $backup_changed -eq 1 ]]; then
         msg "$WH" "local database changed"
         backup_latest
-    elif [[ $local_changed -eq 1 && $is_backup_changed -eq 0 ]]; then
+    elif [[ $local_changed -eq 1 && $backup_changed -eq 0 ]]; then
         msg "$WH" "local database already backed up"
     fi
 }

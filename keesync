@@ -282,7 +282,20 @@ update_script_github() {
     msg "$WH" "pulling remote keesync script from ${WH}$KEESYNC_UPDATE_GITHUB_REPO_URL${X}"
 
     local success=1
-    wget "$KEESYNC_UPDATE_GITHUB_SCRIPT_URL" -O "$(get_local_filename "keesync" "sh")" || success=0
+    wget "$KEESYNC_UPDATE_GITHUB_SCRIPT_URL" -O "$(get_local_filename "keesync" "sh")" --quiet || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$WH" "changes to previous version:"
+        diff --color=auto -u "${BASH_SOURCE[0]}" "$(get_local_filename "keesync" "sh")"
+
+        local reply=
+        msg_header "$BH"
+        read -p "accept new version? [y/N] " -n 1 -r reply
+        echo
+        if ! [[ $reply =~ ^[Yy]$ ]]; then
+            success=0
+        fi
+    fi
 
     if [[ $success -eq 1 ]]; then
         cp "$(get_local_filename "keesync" "sh")" "${BASH_SOURCE[0]}" || success=0

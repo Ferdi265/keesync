@@ -231,7 +231,7 @@ pull_remote() {
         local new_mtime=$(get_saved_mtime "${KEESYNC_DBNAME}.${KEESYNC_RSUFFIX}")
 
         if [[ $new_mtime -ne $prev_mtime ]]; then
-            msg "$GH" "remote database updated on ${WH}$(fmt_epoch_human $new_mtime)${X}"
+            msg "$GH" "remote database updated on ${WH}$(fmt_epoch_human "$new_mtime")${X}"
         else
             msg "$GH" "remote database up to date"
         fi

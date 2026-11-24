@@ -16,6 +16,7 @@ KEESYNC_ITSUFFIX=${KEESYNC_ITSUFFIX:-itime}
 KEESYNC_LBSUFFIX=${KEESYNC_LBSUFFIX:-lastbackup}
 KEESYNC_SSH=${KEESYNC_SSH:-ssh}
 KEESYNC_SCP=${KEESYNC_SCP:-rsync -e ssh --info=NAME}
+KEESYNC_UPDATE_GITHUB_SCRIPT_URL=${KEESYNC_UPDATE_GITHUB_SCRIPT_URL:-https://raw.githubusercontent.com/Ferdi265/keesync/refs/heads/main/keesync}
 
 term_color() {
     echo -n $'\x1b['"$1"';'"$2"'m'
@@ -265,6 +266,27 @@ pull_script() {
     local success=1
     $KEESYNC_SCP "$(get_remote_filename "keesync" "sh")" "$(get_local_filename "keesync" "sh")" || success=0
     cp "$(get_local_filename "keesync" "sh")" "${BASH_SOURCE[0]}" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        msg "$GH" "pull succeeded"
+        exit 0
+    else
+        msg "$RH" "pull failed"
+        exit 1
+    fi
+}
+
+update_script_github() {
+    [[ $# -ne 0 ]] && exit 2
+
+    msg "$WH" "pulling remote keesync script from ${WH}$KEESYNC_UPDATE_GITHUB_REPO_URL${X}"
+
+    local success=1
+    wget "$KEESYNC_UPDATE_GITHUB_SCRIPT_URL" -O "$(get_local_filename "keesync" "sh")" || success=0
+
+    if [[ $success -eq 1 ]]; then
+        cp "$(get_local_filename "keesync" "sh")" "${BASH_SOURCE[0]}" || success=0
+    fi
 
     if [[ $success -eq 1 ]]; then
         msg "$GH" "pull succeeded"
@@ -538,21 +560,22 @@ elif [[ $# -eq 1 ]]; then
         help)
             msg "$GH" "usage:"
             msg "$GH" ""
-            msg "$GH" "keesync ................... normal sync"
-            msg "$GH" "keesync help .............. print this help"
+            msg "$GH" "keesync ....................... normal sync"
+            msg "$GH" "keesync help .................. print this help"
             msg "$GH" ""
-            msg "$GH" "keesync force-push ........ force push DB"
-            msg "$GH" "keesync force-pull ........ force pull DB"
-            msg "$GH" "keesync force-backup ...... force backup current DB"
+            msg "$GH" "keesync force-push ............ force push DB"
+            msg "$GH" "keesync force-pull ............ force pull DB"
+            msg "$GH" "keesync force-backup .......... force backup current DB"
             msg "$GH" ""
-            msg "$GH" "keesync list .............. list all DB backups"
-            msg "$GH" "keesync pull-backups ...... download all DB backups"
-            msg "$GH" "keesync select [version] .. select a DB backup to use"
-            msg "$GH" "keesync merge [version] ... merge from a DB backup"
-            msg "$GH" "keesync diff [version] .... diff a DB backup (merge dry-run)"
+            msg "$GH" "keesync list .................. list all DB backups"
+            msg "$GH" "keesync pull-backups .......... download all DB backups"
+            msg "$GH" "keesync select [version] ...... select a DB backup to use"
+            msg "$GH" "keesync merge [version] ....... merge from a DB backup"
+            msg "$GH" "keesync diff [version] ........ diff a DB backup (merge dry-run)"
             msg "$GH" ""
-            msg "$GH" "keesync push-script ....... force push keesync script"
-            msg "$GH" "keesync pull-script ....... force pull keesync script"
+            msg "$GH" "keesync push-script ........... force push keesync script"
+            msg "$GH" "keesync pull-script ........... force pull keesync script"
+            msg "$GH" "keesync update-script-github .. update script from github"
             ;;
 
         force-push|force_push) push_latest;;
@@ -569,6 +592,7 @@ elif [[ $# -eq 1 ]]; then
 
         push-script|push_script) push_script;;
         pull-script|pull_script) pull_script;;
+        update-script-github|update_script_github) update_script_github;;
 
         *)
             msg "$RH" "invalid arguments, see ${WH}keesync help${X}"

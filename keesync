@@ -1,4 +1,6 @@
 #!/bin/bash
+# shellcheck disable=SC2120
+# shellcheck disable=SC2155
 
 KEESYNC_CONFIGPATH=${KEESYNC_CONFIGPATH:-~/.config/keesync/config.sh}
 KEESYNC_HOSTNAME=${KEESYNC_HOSTNAME:-${HOSTNAME:-unknown}}
@@ -136,7 +138,6 @@ get_remote_filename() {
     echo "${KEESYNC_SERVER}:${KEESYNC_HPATH}/${name}.${suffix}"
 }
 
-# shellcheck disable=SC2120
 get_cur_time() {
     [[ $# -ne 0 ]] && exit 2
     date "+%s"
@@ -165,7 +166,6 @@ has() {
     [[ -f "$dbfile" && -f "$mtfile" ]] && echo 1 || echo 0
 }
 
-# shellcheck disable=SC2120
 is_local_changed() {
     [[ $# -ne 0 ]] && exit 2
     local dbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_DBSUFFIX}")"
@@ -186,7 +186,6 @@ is_local_changed() {
     fi
 }
 
-# shellcheck disable=SC2120
 is_remote_updated() {
     [[ $# -ne 0 ]] && exit 2
     local local_saved_mtime=$(get_saved_mtime "${KEESYNC_DBNAME}")
@@ -195,7 +194,6 @@ is_remote_updated() {
     [[ $remote_saved_mtime -gt $local_saved_mtime ]] && echo 1 || echo 0
 }
 
-# shellcheck disable=SC2120
 is_backup_changed() {
     [[ $# -ne 0 ]] && exit 2
     local lbfile="$(get_local_filename "${KEESYNC_DBNAME}" "${KEESYNC_LBSUFFIX}")"
@@ -217,7 +215,6 @@ is_backup_changed() {
 
 # --- commands ---
 
-# shellcheck disable=SC2120
 pull_remote() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -244,7 +241,6 @@ pull_remote() {
     fi
 }
 
-# shellcheck disable=SC2120
 pull_backups() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -261,7 +257,6 @@ pull_backups() {
     fi
 }
 
-# shellcheck disable=SC2120
 pull_script() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -298,7 +293,6 @@ push_backup() {
     fi
 }
 
-# shellcheck disable=SC2120
 backup_changed() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -313,7 +307,6 @@ backup_changed() {
 }
 
 KEESYNC_DB_OVERWRITE_UNLOCKED=0
-# shellcheck disable=SC2120
 unlock_db_overwrite() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -326,7 +319,6 @@ unlock_db_overwrite() {
     [[ "$KEESYNC_DB_OVERWRITE_UNLOCKED" -eq 1 ]]
 }
 
-# shellcheck disable=SC2120
 push_latest() {
     [[ $# -ne 0 ]] && exit 2
     unlock_db_overwrite || exit 2
@@ -356,7 +348,6 @@ push_latest() {
     fi
 }
 
-# shellcheck disable=SC2120
 push_script() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -375,7 +366,6 @@ push_script() {
     fi
 }
 
-# shellcheck disable=SC2120
 backup_latest() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -478,7 +468,6 @@ user_selectdb() {
     fi
 }
 
-# shellcheck disable=SC2120
 user_auto_mergedb() {
     [[ $# -ne 0 ]] && exit 2
 
@@ -530,6 +519,7 @@ user_listdb() {
 }
 
 if [[ -f "$KEESYNC_CONFIGPATH" ]]; then
+    # shellcheck disable=SC1090
     source "$KEESYNC_CONFIGPATH"
 fi
 
